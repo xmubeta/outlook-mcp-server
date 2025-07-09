@@ -11,6 +11,8 @@ mcp = FastMCP("outlook-assistant")
 MAX_DAYS = 30
 # Email cache for storing retrieved emails by number
 email_cache = {}
+# Calendar cache for storing retrieved appointments by number
+calendar_cache = {}
 
 # Helper functions
 def connect_to_outlook():
@@ -85,6 +87,97 @@ def clear_email_cache():
     """Clear the email cache"""
     global email_cache
     email_cache = {}
+
+def clear_calendar_cache():
+    """Clear the calendar cache"""
+    global calendar_cache
+    calendar_cache = {}
+
+def format_appointment(appointment) -> Dict[str, Any]:
+    """Format an Outlook appointment item into a structured dictionary"""
+    try:
+        # Extract attendees
+        attendees = []
+        if hasattr(appointment, 'Recipients') and appointment.Recipients:
+            for i in range(1, appointment.Recipients.Count + 1):
+                recipient = appointment.Recipients(i)
+                try:
+                    attendees.append(f"{recipient.Name} <{recipient.Address}>")
+                except:
+                    attendees.append(f"{recipient.Name}")
+        
+        # Format the appointment data
+        appointment_data = {
+            "id": appointment.EntryID,
+            "subject": appointment.Subject,
+            "start_time": appointment.Start.strftime("%Y-%m-%d %H:%M:%S") if appointment.Start else None,
+            "end_time": appointment.End.strftime("%Y-%m-%d %H:%M:%S") if appointment.End else None,
+            "location": appointment.Location if hasattr(appointment, 'Location') else "",
+            "organizer": appointment.Organizer if hasattr(appointment, 'Organizer') else "",
+            "attendees": attendees,
+            "body": appointment.Body if hasattr(appointment, 'Body') else "",
+            "is_all_day": appointment.AllDayEvent if hasattr(appointment, 'AllDayEvent') else False,
+            "is_recurring": appointment.IsRecurring if hasattr(appointment, 'IsRecurring') else False,
+            "reminder_minutes": appointment.ReminderMinutesBeforeStart if hasattr(appointment, 'ReminderMinutesBeforeStart') else 0,
+            "categories": appointment.Categories if hasattr(appointment, 'Categories') else "",
+            "importance": appointment.Importance if hasattr(appointment, 'Importance') else 1,
+            "busy_status": appointment.BusyStatus if hasattr(appointment, 'BusyStatus') else 2
+        }
+        return appointment_data
+    except Exception as e:
+        raise Exception(f"Failed to format appointment: {str(e)}")
+
+def get_appointments_from_calendar(calendar, days: int, search_term: Optional[str] = None):
+    """Get appointments from calendar with optional search filter"""
+    appointments_list = []
+    
+    # Calculate the date range
+    now = datetime.datetime.now()
+    # For calendar appointments, look from today to future days
+    start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)  # Start from today 00:00:00
+    end_date = (start_date + datetime.timedelta(days=days)).replace(hour=23, minute=59, second=59, microsecond=0)  # Look forward exactly 'days', end at 23:59:59    
+    try:
+        # Get appointments in date range
+        calendar_items = calendar.Items
+        calendar_items.Sort("[Start]", False)  # Sort by start time
+        
+        # Process appointments without date filter first, then filter manually
+        for item in calendar_items:
+            try:
+                # Check if appointment is within our date range
+                if hasattr(item, 'Start') and item.Start:
+                    item_start = item.Start.replace(tzinfo=None)
+                    if not (start_date <= item_start <= end_date):
+                        continue
+                
+                # Manual search filter if needed
+                if search_term:
+                    search_terms = [term.strip().lower() for term in search_term.split(" OR ")]
+                    
+                    # Check if any of the search terms match
+                    found_match = False
+                    for term in search_terms:
+                        if (term in item.Subject.lower() or 
+                            term in item.Location.lower() or 
+                            term in item.Body.lower()):
+                            found_match = True
+                            break
+                    
+                    if not found_match:
+                        continue
+                
+                # Format and add the appointment
+                appointment_data = format_appointment(item)
+                appointments_list.append(appointment_data)
+                
+            except Exception as e:
+                print(f"Warning: Error processing appointment: {str(e)}")
+                continue
+                
+    except Exception as e:
+        print(f"Error retrieving appointments: {str(e)}")
+        
+    return appointments_list
 
 def get_emails_from_folder(folder, days: int, search_term: Optional[str] = None):
     """Get emails from a folder with optional search filter"""
@@ -447,6 +540,215 @@ def compose_email(recipient_email: str, subject: str, body: str, cc_email: Optio
     except Exception as e:
         return f"Error sending email: {str(e)}"
 
+# Calendar Tools
+@mcp.tool()
+def list_calendar_appointments(days: int = 14) -> str:
+    """
+    List calendar appointments from the specified number of days (past and future)
+    
+    Args:
+        days: Number of days to look (half past, half future, max 60)
+        
+    Returns:
+        Numbered list of appointments with basic information
+    """
+    if not isinstance(days, int) or days < 1 or days > 60:
+        return f"Error: 'days' must be an integer between 1 and 60"
+    
+    try:
+        # Connect to Outlook
+        _, namespace = connect_to_outlook()
+        
+        # Get the default calendar folder
+        calendar = namespace.GetDefaultFolder(9)  # 9 is the calendar folder
+        
+        # Clear previous cache
+        clear_calendar_cache()
+        
+        # Get appointments from calendar
+        appointments = get_appointments_from_calendar(calendar, days)
+        
+        if not appointments:
+            return f"No appointments found in the next {days} days."
+        
+        result = f"Found {len(appointments)} appointments in the next {days} days:\n\n"
+        
+        # Cache appointments and build result
+        for i, appointment in enumerate(appointments, 1):
+            # Store in cache
+            calendar_cache[i] = appointment
+            
+            # Format for display
+            result += f"Appointment #{i}\n"
+            result += f"Subject: {appointment['subject']}\n"
+            result += f"Start: {appointment['start_time']}\n"
+            result += f"End: {appointment['end_time']}\n"
+            result += f"Location: {appointment['location']}\n"
+            result += f"All Day: {'Yes' if appointment['is_all_day'] else 'No'}\n"
+            result += f"Recurring: {'Yes' if appointment['is_recurring'] else 'No'}\n\n"
+        
+        result += "To view the full details of an appointment, use the get_appointment_by_number tool with the appointment number."
+        return result
+    
+    except Exception as e:
+        return f"Error retrieving calendar appointments: {str(e)}"
+
+@mcp.tool()
+def search_calendar_appointments(search_term: str, days: int = 14) -> str:
+    """
+    Search calendar appointments by keyword within a time period
+    
+    Args:
+        search_term: Keyword to search for in subject, location, or body
+        days: Number of days to look (half past, half future, max 60)
+        
+    Returns:
+        Numbered list of matching appointments
+    """
+    if not search_term:
+        return "Error: Please provide a search term"
+        
+    if not isinstance(days, int) or days < 1 or days > 60:
+        return f"Error: 'days' must be an integer between 1 and 60"
+    
+    try:
+        # Connect to Outlook
+        _, namespace = connect_to_outlook()
+        
+        # Get the default calendar folder
+        calendar = namespace.GetDefaultFolder(9)  # 9 is the calendar folder
+        
+        # Clear previous cache
+        clear_calendar_cache()
+        
+        # Get appointments matching search term
+        appointments = get_appointments_from_calendar(calendar, days, search_term)
+        
+        if not appointments:
+            return f"No appointments matching '{search_term}' found in the next {days} days."
+        
+        result = f"Found {len(appointments)} appointments matching '{search_term}' in the next {days} days:\n\n"
+        
+        # Cache appointments and build result
+        for i, appointment in enumerate(appointments, 1):
+            # Store in cache
+            calendar_cache[i] = appointment
+            
+            # Format for display
+            result += f"Appointment #{i}\n"
+            result += f"Subject: {appointment['subject']}\n"
+            result += f"Start: {appointment['start_time']}\n"
+            result += f"End: {appointment['end_time']}\n"
+            result += f"Location: {appointment['location']}\n"
+            result += f"All Day: {'Yes' if appointment['is_all_day'] else 'No'}\n"
+            result += f"Recurring: {'Yes' if appointment['is_recurring'] else 'No'}\n\n"
+        
+        result += "To view the full details of an appointment, use the get_appointment_by_number tool with the appointment number."
+        return result
+    
+    except Exception as e:
+        return f"Error searching calendar appointments: {str(e)}"
+
+@mcp.tool()
+def get_appointment_by_number(appointment_number: int) -> str:
+    """
+    Get detailed information of a specific appointment by its number from the last listing
+    
+    Args:
+        appointment_number: The number of the appointment from the list results
+        
+    Returns:
+        Full details of the specified appointment
+    """
+    try:
+        if not calendar_cache:
+            return "Error: No appointments have been listed yet. Please use list_calendar_appointments or search_calendar_appointments first."
+        
+        if appointment_number not in calendar_cache:
+            return f"Error: Appointment #{appointment_number} not found in the current listing."
+        
+        appointment_data = calendar_cache[appointment_number]
+        
+        # Format the output
+        result = f"Appointment #{appointment_number} Details:\n\n"
+        result += f"Subject: {appointment_data['subject']}\n"
+        result += f"Start Time: {appointment_data['start_time']}\n"
+        result += f"End Time: {appointment_data['end_time']}\n"
+        result += f"Location: {appointment_data['location']}\n"
+        result += f"Organizer: {appointment_data['organizer']}\n"
+        
+        if appointment_data['attendees']:
+            result += f"Attendees: {', '.join(appointment_data['attendees'])}\n"
+        
+        result += f"All Day Event: {'Yes' if appointment_data['is_all_day'] else 'No'}\n"
+        result += f"Recurring: {'Yes' if appointment_data['is_recurring'] else 'No'}\n"
+        result += f"Reminder: {appointment_data['reminder_minutes']} minutes before\n"
+        result += f"Categories: {appointment_data['categories']}\n"
+        
+        # Busy status mapping
+        busy_status_map = {0: 'Free', 1: 'Tentative', 2: 'Busy', 3: 'Out of Office'}
+        result += f"Busy Status: {busy_status_map.get(appointment_data['busy_status'], 'Unknown')}\n"
+        
+        if appointment_data['body']:
+            result += f"\nDescription:\n{appointment_data['body']}\n"
+        
+        return result
+    
+    except Exception as e:
+        return f"Error retrieving appointment details: {str(e)}"
+
+@mcp.tool()
+def create_calendar_appointment(subject: str, start_time: str, end_time: str, location: Optional[str] = None, body: Optional[str] = None, attendees: Optional[str] = None) -> str:
+    """
+    Create a new calendar appointment
+    
+    Args:
+        subject: Subject/title of the appointment
+        start_time: Start time in format 'YYYY-MM-DD HH:MM'
+        end_time: End time in format 'YYYY-MM-DD HH:MM'
+        location: Location of the appointment (optional)
+        body: Description/body of the appointment (optional)
+        attendees: Comma-separated list of attendee email addresses (optional)
+        
+    Returns:
+        Status message indicating success or failure
+    """
+    try:
+        # Connect to Outlook
+        outlook, _ = connect_to_outlook()
+        
+        # Create a new appointment
+        appointment = outlook.CreateItem(1)  # 1 is the value for an appointment item
+        appointment.Subject = subject
+        
+        # Parse and set start/end times
+        try:
+            appointment.Start = datetime.datetime.strptime(start_time, '%Y-%m-%d %H:%M')
+            appointment.End = datetime.datetime.strptime(end_time, '%Y-%m-%d %H:%M')
+        except ValueError:
+            return "Error: Invalid date format. Please use 'YYYY-MM-DD HH:MM' format."
+        
+        if location:
+            appointment.Location = location
+        
+        if body:
+            appointment.Body = body
+        
+        # Add attendees if provided
+        if attendees:
+            attendee_list = [email.strip() for email in attendees.split(',')]
+            for attendee in attendee_list:
+                if attendee:
+                    appointment.Recipients.Add(attendee)
+        
+        # Save the appointment
+        appointment.Save()
+        
+        return f"Calendar appointment '{subject}' created successfully for {start_time} - {end_time}"
+    
+    except Exception as e:
+        return f"Error creating calendar appointment: {str(e)}"
+
 # Run the server
 if __name__ == "__main__":
     print("Starting Outlook MCP Server...")
@@ -456,7 +758,9 @@ if __name__ == "__main__":
         # Test Outlook connection
         outlook, namespace = connect_to_outlook()
         inbox = namespace.GetDefaultFolder(6)  # 6 is inbox
+        calendar = namespace.GetDefaultFolder(9)  # 9 is calendar
         print(f"Successfully connected to Outlook. Inbox has {inbox.Items.Count} items.")
+        print(f"Calendar folder accessed successfully.")
         
         # Run the MCP server
         print("Starting MCP server. Press Ctrl+C to stop.")
