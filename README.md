@@ -9,8 +9,8 @@ A Model Context Protocol (MCP) server that provides access to Microsoft Outlook 
 - **Email Listing**: Retrieve emails from specified time periods
 - **Email Search**: Search emails by contact name, keywords, or phrases with OR operators
 - **Email Details**: View complete email content, including attachments
-- **Email Composition**: Create and send new emails
-- **Email Replies**: Reply to existing emails
+- **Email Composition**: Create and send new emails, or save as drafts
+- **Email Replies**: Reply to existing emails, with option to save as drafts
 
 ### Calendar Features
 - **Appointment Listing**: Retrieve calendar appointments from specified time periods
@@ -76,8 +76,8 @@ The server provides the following tools:
 2. `list_recent_emails`: Lists email titles from the specified number of days
 3. `search_emails`: Searches emails by contact name or keyword
 4. `get_email_by_number`: Retrieves detailed content of a specific email
-5. `reply_to_email_by_number`: Replies to a specific email
-6. `compose_email`: Creates and sends a new email
+5. `reply_to_email_by_number`: Replies to a specific email (with draft option)
+6. `compose_email`: Creates and sends a new email (with draft option)
 
 #### Calendar Tools
 7. `list_calendar_appointments`: Lists calendar appointments from specified time periods
@@ -124,9 +124,19 @@ Show me the details of email #2 from the list
 Reply to email #3 with: "Thanks for the information. I'll review this and get back to you tomorrow."
 ```
 
+#### Saving Reply as Draft
+```
+Reply to email #3 with: "Thanks for the information. I'll review this and get back to you tomorrow." and save as draft
+```
+
 #### Composing a New Email
 ```
 Send an email to john.doe@example.com with subject "Meeting Agenda" and body "Here's the agenda for our upcoming meeting..."
+```
+
+#### Saving New Email as Draft
+```
+Compose an email to john.doe@example.com with subject "Meeting Agenda" and save as draft
 ```
 
 ### Calendar Examples
@@ -162,6 +172,8 @@ Schedule a team meeting for tomorrow at 2 PM to 3 PM in Conference Room A
 ## Security Considerations
 
 This server has access to your Outlook email account and can read, send, and manage emails. Use it only with trusted MCP clients and in secure environments.
+
+**Draft Safety Feature**: Both `compose_email` and `reply_to_email_by_number` support a `save_as_draft` parameter to save emails as drafts instead of sending immediately, reducing the risk of accidental sends.
 
 ## Limitations
 

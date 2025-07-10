@@ -463,13 +463,14 @@ def get_email_by_number(email_number: int) -> str:
         return f"Error retrieving email details: {str(e)}"
 
 @mcp.tool()
-def reply_to_email_by_number(email_number: int, reply_text: str) -> str:
+def reply_to_email_by_number(email_number: int, reply_text: str, save_as_draft: bool = True) -> str:
     """
     Reply to a specific email by its number from the last listing
     
     Args:
         email_number: The number of the email from the list results
         reply_text: The text content for the reply
+        save_as_draft: If True, save as draft instead of sending immediately (default: False)
         
     Returns:
         Status message indicating success or failure
@@ -495,16 +496,24 @@ def reply_to_email_by_number(email_number: int, reply_text: str) -> str:
         reply = email.Reply()
         reply.Body = reply_text
         
-        # Send the reply
-        reply.Send()
+        # Handle string 'true'/'false' as well as boolean values
+        if isinstance(save_as_draft, str):
+            save_as_draft = save_as_draft.lower() in ['true', '1', 'yes']
         
-        return f"Reply sent successfully to: {email.SenderName} <{email.SenderEmailAddress}>"
+        if save_as_draft:
+            # Save as draft
+            reply.Save()
+            return f"Reply saved as draft for: {email.SenderName} <{email.SenderEmailAddress}>"
+        else:
+            # Send the reply
+            reply.Send()
+            return f"Reply sent successfully to: {email.SenderName} <{email.SenderEmailAddress}>"
     
     except Exception as e:
         return f"Error replying to email: {str(e)}"
 
 @mcp.tool()
-def compose_email(recipient_email: str, subject: str, body: str, cc_email: Optional[str] = None) -> str:
+def compose_email(recipient_email: str, subject: str, body: str, cc_email: Optional[str] = None, save_as_draft: bool = True) -> str:
     """
     Compose and send a new email
     
@@ -513,6 +522,7 @@ def compose_email(recipient_email: str, subject: str, body: str, cc_email: Optio
         subject: Subject line of the email
         body: Main content of the email
         cc_email: Email address for CC (optional)
+        save_as_draft: If True, save as draft instead of sending immediately (default: False)
         
     Returns:
         Status message indicating success or failure
@@ -532,13 +542,21 @@ def compose_email(recipient_email: str, subject: str, body: str, cc_email: Optio
         # Add signature to the body
         mail.Body = body
         
-        # Send the email
-        mail.Send()
+        # Handle string 'true'/'false' as well as boolean values
+        if isinstance(save_as_draft, str):
+            save_as_draft = save_as_draft.lower() in ['true', '1', 'yes']
         
-        return f"Email sent successfully to: {recipient_email}"
+        if save_as_draft:
+            # Save as draft
+            mail.Save()
+            return f"Email saved as draft for: {recipient_email}"
+        else:
+            # Send the email
+            mail.Send()
+            return f"Email sent successfully to: {recipient_email}"
     
     except Exception as e:
-        return f"Error sending email: {str(e)}"
+        return f"Error composing email: {str(e)}"
 
 # Calendar Tools
 @mcp.tool()
